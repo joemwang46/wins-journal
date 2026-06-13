@@ -1,0 +1,85 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+    /* Prevent elastic overscroll in standalone PWA */
+    overscroll-behavior: none;
+  }
+
+  body {
+    @apply bg-cream-50 text-warm-800 antialiased;
+    font-feature-settings: 'kern' 1, 'liga' 1;
+    /* Prevent elastic overscroll */
+    overscroll-behavior: none;
+    /* Momentum scrolling on iOS for scrollable areas */
+    -webkit-overflow-scrolling: touch;
+  }
+
+  * {
+    @apply border-cream-200;
+  }
+
+  /* Prevent iOS text-size adjustment in landscape */
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  /* 16px minimum on inputs prevents iOS auto-zoom on focus */
+  input, textarea, select {
+    font-size: 16px;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply w-full py-3.5 px-4 rounded-2xl bg-blush-300 text-white font-medium
+           tracking-wide transition-all duration-200
+           hover:bg-blush-400 active:scale-[0.98]
+           disabled:opacity-50 disabled:cursor-not-allowed;
+    /* Solid touch target for iOS */
+    min-height: 48px;
+    touch-action: manipulation;
+  }
+
+  .btn-ghost {
+    @apply w-full py-3.5 px-4 rounded-2xl text-warm-700 font-medium
+           tracking-wide transition-all duration-200
+           hover:bg-cream-200 active:scale-[0.98];
+    min-height: 48px;
+    touch-action: manipulation;
+  }
+
+  .input-field {
+    @apply w-full px-4 py-3 rounded-2xl bg-cream-100 border border-cream-200
+           text-warm-800 placeholder-warm-700/40
+           focus:outline-none focus:ring-2 focus:ring-blush-200 focus:border-blush-200
+           transition-all duration-200;
+    /* 16px prevents iOS auto-zoom (already covered by base rule, belt+suspenders) */
+    font-size: 16px;
+  }
+
+  .card {
+    @apply bg-white/70 backdrop-blur-sm rounded-3xl border border-cream-200 shadow-sm;
+  }
+
+  /* Skeleton shimmer for loading states */
+  .skeleton {
+    @apply bg-cream-200 rounded-full;
+    background: linear-gradient(
+      90deg,
+      theme('colors.cream.100') 25%,
+      theme('colors.cream.200') 50%,
+      theme('colors.cream.100') 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.4s ease-in-out infinite;
+  }
+}
+
+@keyframes shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
