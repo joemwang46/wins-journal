@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 import { useOnlineStatus } from '../lib/useOnlineStatus'
 import BottomNav from '../components/BottomNav'
+import CommentSection from '../components/CommentSection'
 
 const MAX_CHARS = 500
 
@@ -41,6 +42,7 @@ export default function Home() {
   const [content, setContent]           = useState('')
   const [submitting, setSubmitting]     = useState(false)
   const [submitError, setSubmitError]   = useState('')
+  const [comments, setComments]         = useState([])
 
   useEffect(() => {
     const userId = session.user.id
@@ -82,6 +84,46 @@ export default function Home() {
 
     return () => { supabase.removeChannel(channel) }
   }, [coupleId, entryDate, session.user.id])
+
+  const myEntryId = myEntry?.id
+  const partnerEntryId = partnerEntry?.id
+
+  // Comments unlock post-reveal: fetch existing ones and subscribe for the partner's new ones.
+  useEffect(() => {
+    if (!myEntryId || !partnerEntryId) return
+    const entryIds = [myEntryId, partnerEntryId]
+
+    supabase
+      .from('comments')
+      .select('*')
+      .in('entry_id', entryIds)
+      .order('created_at')
+      .then(({ data }) => { if (data) setComments(data) })
+
+    const channel = supabase
+      .channel(`comments-${coupleId}-${entryDate}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'comments',
+        filter: `couple_id=eq.${coupleId}`,
+      }, (payload) => {
+        const row = payload.new
+        if (!entryIds.includes(row.entry_id)) return
+        setComments(prev => prev.some(c => c.id === row.id) ? prev : [...prev, row])
+      })
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [myEntryId, partnerEntryId, coupleId, entryDate])
+
+  function handleCommentAdded(comment) {
+    setComments(prev => prev.some(c => c.id === comment.id) ? prev : [...prev, comment])
+  }
+
+  function handleCommentDeleted(id) {
+    setComments(prev => prev.filter(c => c.id !== id))
+  }
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -237,28 +279,52 @@ export default function Home() {
             </h2>
 
             <div className="grid grid-cols-1 gap-4">
-              <div className="card p-5 flex flex-col">
-                <p className="text-xs uppercase tracking-wider text-blush-300 font-medium mb-3">
-                  {myName || 'You'}
-                </p>
-                <p className="font-serif text-warm-800 leading-relaxed flex-1 text-base">
-                  {myEntry.content}
-                </p>
-                <p className="text-xs text-warm-700/30 mt-4">
-                  {formatTime(myEntry.submitted_at)}
-                </p>
+              <div>
+                <div className="card p-5 flex flex-col">
+                  <p className="text-xs uppercase tracking-wider text-blush-300 font-medium mb-3">
+                    {myName || 'You'}
+                  </p>
+                  <p className="font-serif text-warm-800 leading-relaxed flex-1 text-base">
+                    {myEntry.content}
+                  </p>
+                  <p className="text-xs text-warm-700/30 mt-4">
+                    {formatTime(myEntry.submitted_at)}
+                  </p>
+                </div>
+                <CommentSection
+                  entryId={myEntry.id}
+                  coupleId={coupleId}
+                  comments={comments.filter(c => c.entry_id === myEntry.id)}
+                  myUserId={session.user.id}
+                  myName={myName}
+                  partnerName={partnerName}
+                  onAdded={handleCommentAdded}
+                  onDeleted={handleCommentDeleted}
+                />
               </div>
 
-              <div className="card p-5 flex flex-col">
-                <p className="text-xs uppercase tracking-wider text-blush-300 font-medium mb-3">
-                  {partnerName || 'Your partner'}
-                </p>
-                <p className="font-serif text-warm-800 leading-relaxed flex-1 text-base">
-                  {partnerEntry.content}
-                </p>
-                <p className="text-xs text-warm-700/30 mt-4">
-                  {formatTime(partnerEntry.submitted_at)}
-                </p>
+              <div>
+                <div className="card p-5 flex flex-col">
+                  <p className="text-xs uppercase tracking-wider text-blush-300 font-medium mb-3">
+                    {partnerName || 'Your partner'}
+                  </p>
+                  <p className="font-serif text-warm-800 leading-relaxed flex-1 text-base">
+                    {partnerEntry.content}
+                  </p>
+                  <p className="text-xs text-warm-700/30 mt-4">
+                    {formatTime(partnerEntry.submitted_at)}
+                  </p>
+                </div>
+                <CommentSection
+                  entryId={partnerEntry.id}
+                  coupleId={coupleId}
+                  comments={comments.filter(c => c.entry_id === partnerEntry.id)}
+                  myUserId={session.user.id}
+                  myName={myName}
+                  partnerName={partnerName}
+                  onAdded={handleCommentAdded}
+                  onDeleted={handleCommentDeleted}
+                />
               </div>
             </div>
           </div>

@@ -2,6 +2,10 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 import BottomNav from '../components/BottomNav'
+import CommentSection from '../components/CommentSection'
+import HistoryCalendar from '../components/HistoryCalendar'
+
+const VIEW_STORAGE_KEY = 'wins-history-view'
 
 function parseLocalDate(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number)
@@ -86,6 +90,13 @@ export default function History() {
   const [cursor, setCursor]         = useState(null)
   const [myName, setMyName]         = useState('')
   const [partnerName, setPartnerName] = useState('')
+  const [commentsByEntry, setCommentsByEntry] = useState({})
+  const [view, setViewState] = useState(() => sessionStorage.getItem(VIEW_STORAGE_KEY) ?? 'timeline')
+
+  function setView(v) {
+    setViewState(v)
+    sessionStorage.setItem(VIEW_STORAGE_KEY, v)
+  }
 
   useEffect(() => {
     supabase.from('profiles').select('user_id, display_name').then(({ data }) => {
@@ -115,6 +126,21 @@ export default function History() {
 
     if (data?.length) {
       const paired = groupIntoDays(data, session.user.id)
+
+      const entryIds = paired.flatMap(d => [d.mine.id, d.theirs.id])
+      if (entryIds.length) {
+        const { data: commentRows } = await supabase
+          .from('comments')
+          .select('*')
+          .in('entry_id', entryIds)
+          .order('created_at')
+        if (commentRows) {
+          const grouped = {}
+          for (const c of commentRows) (grouped[c.entry_id] ??= []).push(c)
+          setCommentsByEntry(prev => ({ ...prev, ...grouped }))
+        }
+      }
+
       setDays(prev => {
         if (isInitial) return paired
         const seen = new Set(prev.map(d => d.date))
@@ -128,6 +154,21 @@ export default function History() {
     }
 
     isInitial ? setLoading(false) : setLoadingMore(false)
+  }
+
+  function handleCommentAdded(comment) {
+    setCommentsByEntry(prev => {
+      const existing = prev[comment.entry_id] ?? []
+      if (existing.some(c => c.id === comment.id)) return prev
+      return { ...prev, [comment.entry_id]: [...existing, comment] }
+    })
+  }
+
+  function handleCommentDeleted(entryId, id) {
+    setCommentsByEntry(prev => ({
+      ...prev,
+      [entryId]: (prev[entryId] ?? []).filter(c => c.id !== id),
+    }))
   }
 
   return (
@@ -147,13 +188,40 @@ export default function History() {
         className="flex-1 px-5 pt-1 overflow-y-auto"
         style={{ paddingBottom: 'calc(6rem + env(safe-area-inset-bottom))' }}
       >
-        <h2 className="text-2xl font-serif text-warm-800 mb-6">History</h2>
+        <h2 className="text-2xl font-serif text-warm-800 mb-4">History</h2>
+
+        {/* ── View toggle ──────────────────────────────────── */}
+        <div className="flex bg-cream-100 border border-cream-200 rounded-2xl p-1 mb-5">
+          {['timeline', 'calendar'].map(v => (
+            <button
+              key={v}
+              onClick={() => setView(v)}
+              className={`flex-1 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${
+                view === v
+                  ? 'bg-white/80 shadow-sm text-warm-800'
+                  : 'text-warm-700/50'
+              }`}
+            >
+              {v === 'timeline' ? 'Timeline' : 'Calendar'}
+            </button>
+          ))}
+        </div>
+
+        {/* ── Calendar view ────────────────────────────────── */}
+        {view === 'calendar' && (
+          <HistoryCalendar
+            coupleId={coupleId}
+            myUserId={session.user.id}
+            myName={myName}
+            partnerName={partnerName}
+          />
+        )}
 
         {/* ── Skeleton while loading ───────────────────────── */}
-        {loading && <HistorySkeleton />}
+        {view === 'timeline' && loading && <HistorySkeleton />}
 
         {/* ── Empty state ──────────────────────────────────── */}
-        {!loading && days.length === 0 && (
+        {view === 'timeline' && !loading && days.length === 0 && (
           <div className="flex flex-col items-center justify-center py-20 text-center animate-fade-in">
             <svg className="w-10 h-10 text-blush-200 mb-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
@@ -165,7 +233,7 @@ export default function History() {
         )}
 
         {/* ── Timeline ─────────────────────────────────────── */}
-        {!loading && days.length > 0 && (
+        {view === 'timeline' && !loading && days.length > 0 && (
           <div className="animate-fade-in">
             {days.map(({ date, mine, theirs }, i) => (
               <div key={date}>
@@ -174,28 +242,52 @@ export default function History() {
                 </p>
 
                 <div className="grid grid-cols-1 gap-3 mb-4">
-                  <div className="card p-4 flex flex-col">
-                    <p className="text-xs uppercase tracking-wider text-blush-300 font-medium mb-2">
-                      {myName || 'You'}
-                    </p>
-                    <p className="font-serif text-warm-800 leading-relaxed text-sm flex-1">
-                      {mine.content}
-                    </p>
-                    <p className="text-xs text-warm-700/30 mt-3">
-                      {formatTime(mine.submitted_at)}
-                    </p>
+                  <div>
+                    <div className="card p-4 flex flex-col">
+                      <p className="text-xs uppercase tracking-wider text-blush-300 font-medium mb-2">
+                        {myName || 'You'}
+                      </p>
+                      <p className="font-serif text-warm-800 leading-relaxed text-sm flex-1">
+                        {mine.content}
+                      </p>
+                      <p className="text-xs text-warm-700/30 mt-3">
+                        {formatTime(mine.submitted_at)}
+                      </p>
+                    </div>
+                    <CommentSection
+                      entryId={mine.id}
+                      coupleId={coupleId}
+                      comments={commentsByEntry[mine.id] ?? []}
+                      myUserId={session.user.id}
+                      myName={myName}
+                      partnerName={partnerName}
+                      onAdded={handleCommentAdded}
+                      onDeleted={id => handleCommentDeleted(mine.id, id)}
+                    />
                   </div>
 
-                  <div className="card p-4 flex flex-col">
-                    <p className="text-xs uppercase tracking-wider text-blush-300 font-medium mb-2">
-                      {partnerName || 'Your partner'}
-                    </p>
-                    <p className="font-serif text-warm-800 leading-relaxed text-sm flex-1">
-                      {theirs.content}
-                    </p>
-                    <p className="text-xs text-warm-700/30 mt-3">
-                      {formatTime(theirs.submitted_at)}
-                    </p>
+                  <div>
+                    <div className="card p-4 flex flex-col">
+                      <p className="text-xs uppercase tracking-wider text-blush-300 font-medium mb-2">
+                        {partnerName || 'Your partner'}
+                      </p>
+                      <p className="font-serif text-warm-800 leading-relaxed text-sm flex-1">
+                        {theirs.content}
+                      </p>
+                      <p className="text-xs text-warm-700/30 mt-3">
+                        {formatTime(theirs.submitted_at)}
+                      </p>
+                    </div>
+                    <CommentSection
+                      entryId={theirs.id}
+                      coupleId={coupleId}
+                      comments={commentsByEntry[theirs.id] ?? []}
+                      myUserId={session.user.id}
+                      myName={myName}
+                      partnerName={partnerName}
+                      onAdded={handleCommentAdded}
+                      onDeleted={id => handleCommentDeleted(theirs.id, id)}
+                    />
                   </div>
                 </div>
 

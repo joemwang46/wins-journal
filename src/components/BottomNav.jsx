@@ -29,6 +29,14 @@ export default function BottomNav() {
           <span className="text-[10px] tracking-wide font-medium">History</span>
         </NavLink>
 
+        <NavLink to="/memories" className={({ isActive }) => `${base} ${isActive ? active : inactive}`}>
+          <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z" />
+            <path d="M18 15l.9 2.1L21 18l-2.1.9L18 21l-.9-2.1L15 18l2.1-.9z" />
+          </svg>
+          <span className="text-[10px] tracking-wide font-medium">Memories</span>
+        </NavLink>
+
         <NavLink to="/profile" className={({ isActive }) => `${base} ${isActive ? active : inactive}`}>
           <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <circle cx="12" cy="8" r="3.5" />

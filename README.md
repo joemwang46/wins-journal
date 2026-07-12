@@ -18,8 +18,11 @@ A private daily journal for two. Each day, you and your partner each write your 
 
 - **Mutual-reveal RLS** — Partner entries are inaccessible at the database level until both users have submitted for the day, not just hidden in the UI
 - **Real-time sync** — Supabase `postgres_changes` subscription reveals the partner's entry the moment it lands
+- **Comments** — Leave a short note under your partner's win once the day is revealed; RLS blocks commenting before both entries exist, and new comments appear in real time
 - **Invite code pairing** — Generate a one-time code to link two accounts into a couple
 - **History timeline** — Paginated feed of every shared day, newest first
+- **Calendar view** — Month grid on the History screen with shared days highlighted; tap one to revisit both wins and their comments in a slide-up sheet. Only the visible month's dates are queried
+- **Memories** — A dedicated tab that resurfaces a random past day's wins (and their comments), with an "Another memory" button to shuffle
 - **Streak counter** — Consecutive days both partners submitted, calculated server-side
 - **Display names** — Set a name that appears on your partner's cards
 - **Offline support** — History is cached for 6 hours via Workbox NetworkFirst; writes show a friendly error when disconnected
@@ -49,7 +52,9 @@ src/
 │   ├── AuthContext.jsx      # Session + coupleId state, loading flag
 │   └── useOnlineStatus.js   # navigator.onLine hook
 ├── components/
-│   ├── BottomNav.jsx        # Three-tab nav (Today / History / Profile)
+│   ├── BottomNav.jsx        # Four-tab nav (Today / History / Memories / Profile)
+│   ├── CommentSection.jsx   # Comment list + input under revealed entry cards
+│   ├── HistoryCalendar.jsx  # Month-grid calendar + day-detail slide-up sheet
 │   ├── ProtectedRoute.jsx   # Requires session + coupleId
 │   ├── AuthRoute.jsx        # Requires session, redirects away if already paired
 │   └── LoadingScreen.jsx
@@ -59,6 +64,7 @@ src/
 │   ├── Pair.jsx             # Generate or enter an invite code
 │   ├── Home.jsx             # Today's entry — three states: write / waiting / reveal
 │   ├── History.jsx          # Paginated timeline with skeleton loading
+│   ├── Memories.jsx         # Random past day's wins, "Another memory" shuffle
 │   └── Profile.jsx          # Display name, streak, couple code, sign out
 scripts/
 └── generate-icons.js        # Generates PWA PNG icons (pure Node, no deps)
@@ -366,6 +372,70 @@ $$;
 
 -- Enable Realtime on the entries table
 ALTER PUBLICATION supabase_realtime ADD TABLE entries;
+```
+
+#### Block 4 — Comments
+
+```sql
+-- Comments on revealed entries
+CREATE TABLE comments (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  entry_id       uuid NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+  author_user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  couple_id      uuid NOT NULL REFERENCES couples(id) ON DELETE CASCADE,
+  content        text NOT NULL CHECK (char_length(content) <= 500),
+  created_at     timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX comments_entry_id_idx ON comments (entry_id);
+
+ALTER TABLE comments ENABLE ROW LEVEL SECURITY;
+
+-- Helper: true if the entry belongs to the current user's couple AND both
+-- partners have submitted for that entry's date (i.e. the entry is revealed)
+CREATE OR REPLACE FUNCTION can_comment_on_entry(p_entry_id uuid)
+RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER STABLE
+SET search_path = public
+AS $$
+DECLARE
+  v_couple_id uuid;
+  v_date      date;
+  v_count     int;
+BEGIN
+  SELECT couple_id, entry_date INTO v_couple_id, v_date
+  FROM entries WHERE id = p_entry_id;
+
+  IF NOT FOUND OR v_couple_id IS DISTINCT FROM get_my_couple_id() THEN
+    RETURN false;
+  END IF;
+
+  SELECT COUNT(DISTINCT user_id) INTO v_count
+  FROM entries
+  WHERE couple_id = v_couple_id AND entry_date = v_date;
+
+  RETURN v_count >= 2;
+END;
+$$;
+
+-- Comments are only allowed post-reveal, on entries within your own couple
+CREATE POLICY "comments: insert own post-reveal"
+ON comments FOR INSERT WITH CHECK (
+  author_user_id = auth.uid()
+  AND couple_id = get_my_couple_id()
+  AND can_comment_on_entry(entry_id)
+);
+
+CREATE POLICY "comments: read couple"
+ON comments FOR SELECT
+USING (couple_id = get_my_couple_id());
+
+CREATE POLICY "comments: delete own"
+ON comments FOR DELETE
+USING (author_user_id = auth.uid());
+
+-- Enable Realtime on the comments table
+ALTER PUBLICATION supabase_realtime ADD TABLE comments;
 ```
 
 ### 5. Start the dev server
